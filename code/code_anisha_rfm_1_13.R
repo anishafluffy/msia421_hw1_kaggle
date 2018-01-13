@@ -27,10 +27,11 @@ x = dat %>%
             recency_last = as.numeric(as.Date('2014-08-01') - max(orddt)), #time since last purchase
             frequency_qty = sum(qty), #number of items
             frequency_ord = n_distinct(ordnum), #number of distinct orders
-            monetary_tot = sum(price), #total spent
+            #changed the formula to monetary_tot to sum(price * qty)
+            monetary_tot = sum(price*qty), #total spent
             monetary_avg = mean(price) #average spent per item
             ) %>% 
-  select(id, recency_first, recency_last, frequency_qty, frequency_ord, monetary_tot, monetary_avg)
+  select(id, recency_first, recency_last, frequency_qty, frequency_ord, monetary_tot, monetary_avg,f)
 head(x) 
 dim(x)
 cor(x[-1])
@@ -40,7 +41,8 @@ all = left_join(x, y, by="id")
 dim(all)
 
 #baseline code: predict logtarg - only using qty
-fit = lm(logtarg ~ log(frequency_qty + 1), all)
+#changed frequency_qty back to f, what prof used
+fit = lm(logtarg ~ log(f + 1), all)
 summary(fit)
 
 #try to predict spend instead of logtarg - transform logtarg to spend

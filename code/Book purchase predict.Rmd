@@ -1,0 +1,115 @@
+---
+title: "book purchase prediction"
+author: "Jamie Chen"
+date: "1/13/2018"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+knitr::opts_knit$set(root.dir = "/Users/siliangchen/msia421_hw1_kaggle")
+```
+
+```{r, message = FALSE}
+library(ggplot2)
+library(lubridate)
+library(dplyr)
+```
+
+Readin data
+```{r}
+#read orders
+dat = read.csv("data/orders.csv")
+dat$orddt = as.Date(dat$orddate, "%d%b%Y")
+head(dat)
+dat$orddate = NULL
+str(dat)
+dim(dat)
+```
+
+```{r}
+#min date = "2007-11-04"
+min(dat$orddt)
+
+#max date = "2014-07-31"
+max(dat$orddt)
+```
+
+```{r}
+# read dependent variable
+y = read.csv("data/booktrain.csv")
+head(y)
+```
+
+```{r}
+# do simple roll up
+x = dat %>%
+ group_by(id) %>%
+ summarise(f=n(), 
+           recency_first = as.numeric(as.Date('2014-08-01') - min(orddt)), #time since first purchase
+           recency_last = as.numeric(as.Date('2014-08-01') - max(orddt)), #time since last purchase
+           date_duration = recency_last - recency_first, #time between 1st and last purchases
+           frequency_qty = sum(qty), #number of items 
+           frequency_ord = n_distinct(ordnum), #number of distinct orders, which <= f
+           monetary_tot = sum(price * qty), #total spent
+           monetary_avg = mean(price) #average price per ordered item
+          )%>% 
+  select(id, recency_first, recency_last, date_duration, frequency_qty, frequency_ord, monetary_tot, monetary_avg,f)
+
+head(x)
+dim(x)
+```
+Additional features
+```{r}
+x$avg_ord = x$monetary_tot/x$frequency_ord 
+cor_mat = cor(x[-1]) 
+cor(x[-1]) > 0.6 #f & freq_ord are colinear as expected
+```
+
+```{r}
+# read dependent variable
+y = read.csv("data/booktrain.csv")
+head(y)
+```
+```{r}
+#merge data
+all = left_join(x,y, by="id")
+dim(all)
+```
+Baseline model
+```{r}
+fit = lm(logtarg ~ log(f +1), all) #question: why add 1 to f here?
+summary(fit)
+```
+Variable transformation based on EDA
+- Create log transormation for variables measured in dollars
+- Create sqrt transformation for count variables.
+```{r}
+train = all[all$logtarg!=0,]
+
+plot(log(train$monetary_tot), train$logtarg)
+plot(log(train$monetary_avg), train$logtarg)
+plot(log(train$avg_ord), train$logtarg)
+
+plot(sqrt(train$frequency_ord), train$logtarg)
+plot(sqrt(train$frequency_qty), train$logtarg)
+
+```
+
+```{r}
+fit1 = lm(logtarg ~ log(monetary_tot+1) + log(avg_ord+1) + sqrt(frequency_ord) + date_duration + recency_first + recency_last, all)
+summary(fit1)
+#note: need to do some data cleaning on customers in the training set with order history price = $0
+```
+```{r}
+all$yhat = predict(fit1,all)
+length(all$yhat)
+head(all)
+
+test = is.na(all$logtarg)
+keep = c('id', 'yhat')
+out = all[test,keep]
+head(out)
+write.csv(out, "output/test_jc.csv", row.names=F)
+```
+
