@@ -33,14 +33,33 @@ x = dat %>%
   select(id, recency_first, recency_last, frequency_qty, frequency_ord, monetary_tot, monetary_avg)
 head(x) 
 dim(x)
+cor(x[-1])
 
 # merge
 all = left_join(x, y, by="id")
 dim(all)
+
+#baseline code: predict logtarg - only using qty
 fit = lm(logtarg ~ log(frequency_qty + 1), all)
 summary(fit)
-all$yhat = predict(fit, all)
-#length(yhat)
+
+#try to predict spend instead of logtarg - transform logtarg to spend
+#logtarg = ln(spend = 1)
+#spend = e^logtarg -1
+all$spend = exp(all$logtarg) - 1
+fit = lm(spend ~ recency_first + recency_last + frequency_qty + frequency_ord + monetary_tot + monetary_avg, all)
+summary(fit)
+
+#predict spend
+all$yhat_spend = predict(fit, all)
+
+#transform prediction back to logtarg
+all$yhat = log(yhat_spend + 1)
+
 head(all)
 test = is.na(all$logtarg)
-write.csv(all[test, c(1,4)], "output/test_rfm.csv", row.names=F)
+write.csv(all[test, c('id', 'yhat')], "output/test_rfm.csv", row.names=F)
+
+
+
+
