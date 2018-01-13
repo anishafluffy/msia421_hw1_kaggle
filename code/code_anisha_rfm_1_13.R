@@ -54,7 +54,7 @@ summary(fit)
 all$yhat_spend = predict(fit, all)
 
 #transform prediction back to logtarg
-all$yhat = log(yhat_spend + 1)
+all$yhat = log(all$yhat_spend + 1)
 
 head(all)
 test = is.na(all$logtarg)
