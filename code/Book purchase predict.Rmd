@@ -14,9 +14,10 @@ knitr::opts_knit$set(root.dir = "/Users/siliangchen/msia421_hw1_kaggle")
 library(ggplot2)
 library(lubridate)
 library(dplyr)
+library(car)
 ```
 
-Readin data
+1. Readin data
 ```{r}
 #read orders
 dat = read.csv("data/orders.csv")
@@ -30,17 +31,25 @@ dim(dat)
 ```{r}
 #min date = "2007-11-04"
 min(dat$orddt)
-
 #max date = "2014-07-31"
 max(dat$orddt)
 ```
-
+1.2 EDA and data checks on orders
 ```{r}
-# read dependent variable
-y = read.csv("data/booktrain.csv")
-head(y)
-```
+missing = dat[!complete.cases(dat),] #no missing value
+#category frequency 
+ggplot(data=dat, aes(x=category)) + geom_histogram(binwidth = 1)
+summary(dat)
 
+#investigate items with $0 in price
+percent_price0 = count(dat[dat$price == 0,])/count(dat)
+
+#The majority of items with 0 price are non-books, add flag to indicate: if category = 99, book = 0, otherwise book = 1
+dat$book = 0
+dat$book[dat$category!=99]=1 
+table(dat$book)
+```
+1.3 feature engineer
 ```{r}
 # do simple roll up
 x = dat %>%
@@ -52,7 +61,7 @@ x = dat %>%
            frequency_qty = sum(qty), #number of items 
            frequency_ord = n_distinct(ordnum), #number of distinct orders, which <= f
            monetary_tot = sum(price * qty), #total spent
-           monetary_avg = mean(price) #average price per ordered item
+           monetary_avg = mean(price) #how expensive is each ordered item
           )%>% 
   select(id, recency_first, recency_last, date_duration, frequency_qty, frequency_ord, monetary_tot, monetary_avg,f)
 
@@ -65,27 +74,22 @@ x$avg_ord = x$monetary_tot/x$frequency_ord
 cor_mat = cor(x[-1]) 
 cor(x[-1]) > 0.6 #f & freq_ord are colinear as expected
 ```
-
+2.Model fitting
 ```{r}
-# read dependent variable
+# read in dependent variable
 y = read.csv("data/booktrain.csv")
-head(y)
-```
-```{r}
-#merge data
-all = left_join(x,y, by="id")
+#head(y)
+
+#join tables
+all = left_join(x,y,by="id")
 dim(all)
 ```
-Baseline model
-```{r}
-fit = lm(logtarg ~ log(f +1), all) #question: why add 1 to f here?
-summary(fit)
-```
+
 Variable transformation based on EDA
 - Create log transormation for variables measured in dollars
 - Create sqrt transformation for count variables.
 ```{r}
-train = all[all$logtarg!=0,]
+train = all[!is.na(all$logtarg),] #8224 obs instead of 8311
 
 plot(log(train$monetary_tot), train$logtarg)
 plot(log(train$monetary_avg), train$logtarg)
@@ -93,12 +97,12 @@ plot(log(train$avg_ord), train$logtarg)
 
 plot(sqrt(train$frequency_ord), train$logtarg)
 plot(sqrt(train$frequency_qty), train$logtarg)
-
 ```
-
+2.1 Baseline model
 ```{r}
-fit1 = lm(logtarg ~ log(monetary_tot+1) + log(avg_ord+1) + sqrt(frequency_ord) + date_duration + recency_first + recency_last, all)
+fit1 = lm(logtarg ~ log(monetary_avg+1) + log(avg_ord+1) + sqrt(frequency_ord) + recency_first + recency_last, all)
 summary(fit1)
+vif(fit1)
 #note: need to do some data cleaning on customers in the training set with order history price = $0
 ```
 ```{r}
