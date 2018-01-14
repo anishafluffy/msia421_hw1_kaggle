@@ -13,6 +13,7 @@ knitr::opts_knit$set(root.dir = "/Users/siliangchen/msia421_hw1_kaggle")
 ```{r, message = FALSE}
 library(ggplot2)
 library(lubridate)
+library(MASS)
 library(dplyr)
 library(car)
 ```
@@ -35,44 +36,81 @@ min(dat$orddt)
 max(dat$orddt)
 ```
 1.2 EDA and data checks on orders
+a. qualitative var - category => category 99 has some oddities (most qty with price - $0, max price = 1533)
+b. quantitative vars - qty,price
 ```{r}
 missing = dat[!complete.cases(dat),] #no missing value
-#category frequency 
+
+#a.category frequency 
 ggplot(data=dat, aes(x=category)) + geom_histogram(binwidth = 1)
-summary(dat)
+
+#category by price (most $)
+result = tapply(dat$price, dat$category,mean)
+sort_price = result[order(result)] #category 17 (art prints) is $$$
+art_collect = dat[dat$category==17,] #these people buy at most 3 items
+
+#category by Q (most popular category)
+result2 = tapply(dat$qty, dat$category,mean)
+sort_q = result2[order(result2)] #note - cat99 nonbooks has the highest avg 
+result3 = tapply(dat$qty, dat$category,median)
+sort_q3 = result3[order(result3)] #median is all 1
+result4 = tapply(dat$qty, dat$category,max)
+sort_q4 = result4[order(result4)] #category 99 is nonbooks, ID 8070857 has price =0, Q = max.
+
+#category by price * Q (most popular category)
+qp = tapply(dat$qty * dat$price, dat$category,mean)
+sort_qp = qp[order(qp)] #align with expectation - 17 has the largest avg order size
+
+qpm = tapply(dat$qty * dat$price, dat$category,max)
+sort_qpm = qpm[order(qpm)] #8,14,35,37 have the max one-time order amounts, >$140k; makes sense, 37 is learning=> textbooks
+```
+
+```{r}
+#Descriptive stats
+summary(dat[,-1])
 
 #investigate items with $0 in price
 percent_price0 = count(dat[dat$price == 0,])/count(dat)
-
-#The majority of items with 0 price are non-books, add flag to indicate: if category = 99, book = 0, otherwise book = 1
+#The majority of items with 0 price are non-books, add flag to indicate: if category = 99, book = 0
 dat$book = 0
 dat$book[dat$category!=99]=1 
 table(dat$book)
 ```
+
 1.3 feature engineer
+-recency: max/min time since last purchase, indicates inactivity
+-frequency: count of previous behaviors, indicates loyalty
+-monetary: sum/total spend of $ or time over a past period
+-time of file: time since first purchase (min/max) 
 ```{r}
 # do simple roll up
 x = dat %>%
  group_by(id) %>%
  summarise(f=n(), 
-           recency_first = as.numeric(as.Date('2014-08-01') - min(orddt)), #time since first purchase
-           recency_last = as.numeric(as.Date('2014-08-01') - max(orddt)), #time since last purchase
+           recency_first = as.numeric(as.Date('2014-08-01') - min(orddt)), #time since first purchase - tof
+           recency_last = as.numeric(as.Date('2014-08-01') - max(orddt)), #time since last purchase - rec
            date_duration = recency_last - recency_first, #time between 1st and last purchases
-           frequency_qty = sum(qty), #number of items 
+           p_qty = sum(qty), #number of items 
            frequency_ord = n_distinct(ordnum), #number of distinct orders, which <= f
            monetary_tot = sum(price * qty), #total spent
            monetary_avg = mean(price) #how expensive is each ordered item
           )%>% 
-  select(id, recency_first, recency_last, date_duration, frequency_qty, frequency_ord, monetary_tot, monetary_avg,f)
+  dplyr::select(id, recency_first, recency_last, date_duration, p_qty, frequency_ord, monetary_tot, monetary_avg,f)
 
 head(x)
 dim(x)
 ```
 Additional features
 ```{r}
+#avg order size
 x$avg_ord = x$monetary_tot/x$frequency_ord 
+
+#purchase rate = purchases/period
+x$prate = x$frequency_ord/x$recency_first
+
+#check predictors cor
 cor_mat = cor(x[-1]) 
-cor(x[-1]) > 0.6 #f & freq_ord are colinear as expected
+cor(x[-1]) > 0.6 #f & freq_ord are colinear as expected, avg_ord and monetary_tot
 ```
 2.Model fitting
 ```{r}
@@ -86,34 +124,44 @@ dim(all)
 ```
 
 Variable transformation based on EDA
-- Create log transormation for variables measured in dollars
-- Create sqrt transformation for count variables.
+- Create log transormation for F and M because of right skew
 ```{r}
 train = all[!is.na(all$logtarg),] #8224 obs instead of 8311
 
 plot(log(train$monetary_tot), train$logtarg)
 plot(log(train$monetary_avg), train$logtarg)
 plot(log(train$avg_ord), train$logtarg)
+plot(log(train$frequency_ord), train$logtarg)
 
-plot(sqrt(train$frequency_ord), train$logtarg)
-plot(sqrt(train$frequency_qty), train$logtarg)
+plot((train$p_qty), train$logtarg)
+plot(log(train$p_qty), train$logtarg)
+
+plot(log(train$prate),train$logtarg)
 ```
-2.1 Baseline model
+2.1 Baseline model => submitted with score 0.61844
 ```{r}
-fit1 = lm(logtarg ~ log(monetary_avg+1) + log(avg_ord+1) + sqrt(frequency_ord) + recency_first + recency_last, all)
+fit1 = lm(logtarg ~ log(monetary_avg+1) + log(avg_ord+1) + log(frequency_ord) + recency_first + recency_last, all)
 summary(fit1)
 vif(fit1)
-#note: need to do some data cleaning on customers in the training set with order history price = $0
 ```
+2.2 Model fit2 => submitted with score 0.61887
 ```{r}
-all$yhat = predict(fit1,all)
+fit2 = lm(logtarg ~ log(monetary_avg+1) + log(avg_ord+1) + log(frequency_ord) + log(prate) + recency_first + recency_last, all)
+summary(fit2)
+
+vif(fit2)
+```
+
+```{r}
+#Predict and output
+all$yhat = predict(fit2,all)
 length(all$yhat)
 head(all)
 
+#output test values
 test = is.na(all$logtarg)
 keep = c('id', 'yhat')
 out = all[test,keep]
 head(out)
 write.csv(out, "output/test_jc.csv", row.names=F)
 ```
-
