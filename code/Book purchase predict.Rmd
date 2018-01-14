@@ -119,7 +119,7 @@ x$prate = x$frequency_ord/x$recency_first
 # ADDED BY SPENCER
 #diversity of order
 x$catrate = x$count_cat/x$frequency_ord
-
+x$prate2 = x$frequency_ord/(x$date_duration + 1)
 
 #check predictors cor
 cor_mat = cor(x[-1]) 
@@ -176,7 +176,8 @@ full = lm(logtarg ~ recency_first + recency_last + date_duration + log(p_qty) + 
           + log(frequency_ord) + log(prate)
         , data = train)
 summary(full)
-          
+
+
 adj = step(full, scope = list(upper=full), data = train, direction="both")
 summary(adj)
 ```
@@ -186,7 +187,7 @@ summary(adj)
 
 ```{r}
 #Predict and output
-all$yhat = predict(fit3,all)
+all$yhat = predict(adj,all)
 length(all$yhat)
 head(all)
 
