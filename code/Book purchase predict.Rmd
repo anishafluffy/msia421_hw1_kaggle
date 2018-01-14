@@ -7,7 +7,8 @@ output: html_document
 
 ```{r setup, include=FALSE}
 knitr::opts_chunk$set(echo = TRUE)
-knitr::opts_knit$set(root.dir = "/Users/siliangchen/msia421_hw1_kaggle")
+# knitr::opts_knit$set(root.dir = "/Users/siliangchen/msia421_hw1_kaggle")
+knitr::opts_knit$set(root.dir = "/Users/spencermoon/Documents/MSiA_421/msia421_hw1_kagglee")
 ```
 
 ```{r, message = FALSE}
@@ -18,10 +19,10 @@ library(dplyr)
 library(car)
 ```
 
-1. Readin data
+1. Reading data
 ```{r}
 #read orders
-dat = read.csv("data/orders.csv")
+dat = read.csv("../data/orders.csv")
 dat$orddt = as.Date(dat$orddate, "%d%b%Y")
 head(dat)
 dat$orddate = NULL
@@ -35,10 +36,12 @@ min(dat$orddt)
 #max date = "2014-07-31"
 max(dat$orddt)
 ```
+
 1.2 EDA and data checks on orders
 a. qualitative var - category => category 99 has some oddities (most qty with price - $0, max price = 1533)
 b. quantitative vars - qty,price
 ```{r}
+
 missing = dat[!complete.cases(dat),] #no missing value
 
 #a.category frequency 
@@ -86,27 +89,37 @@ table(dat$book)
 # do simple roll up
 x = dat %>%
  group_by(id) %>%
- summarise(f=n(), 
+ summarise(f=n(),
+           # FEATURES ADDED BY JAMIE
            recency_first = as.numeric(as.Date('2014-08-01') - min(orddt)), #time since first purchase - tof
            recency_last = as.numeric(as.Date('2014-08-01') - max(orddt)), #time since last purchase - rec
-           date_duration = recency_last - recency_first, #time between 1st and last purchases
+           date_duration = recency_first - recency_last, #time between 1st and last purchases
            p_qty = sum(qty), #number of items 
            frequency_ord = n_distinct(ordnum), #number of distinct orders, which <= f
            monetary_tot = sum(price * qty), #total spent
-           monetary_avg = mean(price) #how expensive is each ordered item
+           monetary_avg = mean(price), #how expensive is each ordered item
+           
+           # FEATURES ADDED BY SPENCER
+           count_cat = n_distinct(category) #number of distinct categories ordered
           )%>% 
-  dplyr::select(id, recency_first, recency_last, date_duration, p_qty, frequency_ord, monetary_tot, monetary_avg,f)
+  dplyr::select(id, recency_first, recency_last, date_duration, p_qty, frequency_ord, monetary_tot, monetary_avg, count_cat,f)
 
 head(x)
 dim(x)
 ```
 Additional features
 ```{r}
+# ADDED BY JAMIE
 #avg order size
 x$avg_ord = x$monetary_tot/x$frequency_ord 
 
 #purchase rate = purchases/period
 x$prate = x$frequency_ord/x$recency_first
+
+# ADDED BY SPENCER
+#diversity of order
+x$catrate = x$count_cat/x$frequency_ord
+
 
 #check predictors cor
 cor_mat = cor(x[-1]) 
@@ -115,7 +128,7 @@ cor(x[-1]) > 0.6 #f & freq_ord are colinear as expected, avg_ord and monetary_to
 2.Model fitting
 ```{r}
 # read in dependent variable
-y = read.csv("data/booktrain.csv")
+y = read.csv("../data/booktrain.csv")
 #head(y)
 
 #join tables
@@ -129,6 +142,9 @@ Variable transformation based on EDA
 train = all[!is.na(all$logtarg),] #8224 obs instead of 8311
 
 plot(log(train$monetary_tot), train$logtarg)
+plot(log(train$monetary_tot +1), train$logtarg)
+plot(train$monetary_tot, train$logtarg)
+
 plot(log(train$monetary_avg), train$logtarg)
 plot(log(train$avg_ord), train$logtarg)
 plot(log(train$frequency_ord), train$logtarg)
@@ -143,6 +159,7 @@ plot(log(train$prate),train$logtarg)
 fit1 = lm(logtarg ~ log(monetary_avg+1) + log(avg_ord+1) + log(frequency_ord) + recency_first + recency_last, all)
 summary(fit1)
 vif(fit1)
+plot(fit1)
 ```
 2.2 Model fit2 => submitted with score 0.61887
 ```{r}
@@ -152,9 +169,24 @@ summary(fit2)
 vif(fit2)
 ```
 
+2.3 Model fit3 ADDED BY SPENCER
+```{r}
+full = lm(logtarg ~ recency_first + recency_last + date_duration + log(p_qty) + log(count_cat)
+          + log(catrate) + log(monetary_avg + 1)  + log(avg_ord + 1) 
+          + log(frequency_ord) + log(prate)
+        , data = train)
+summary(full)
+          
+adj = step(full, scope = list(upper=full), data = train, direction="both")
+summary(adj)
+```
+
+
+
+
 ```{r}
 #Predict and output
-all$yhat = predict(fit2,all)
+all$yhat = predict(fit3,all)
 length(all$yhat)
 head(all)
 
@@ -163,5 +195,5 @@ test = is.na(all$logtarg)
 keep = c('id', 'yhat')
 out = all[test,keep]
 head(out)
-write.csv(out, "output/test_jc.csv", row.names=F)
+write.csv(out, "../output/test_sm.csv", row.names=F)
 ```
