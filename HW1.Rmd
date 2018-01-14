@@ -1,0 +1,144 @@
+---
+title: "Data Mining HW 1"
+author: "Veronica Hsieh"
+date: "1/13/2018"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r}
+library(dplyr)
+```
+# read orders
+```{r}
+dat = read.csv("data/orders.csv")
+dat$orddt = as.Date(dat$orddate, "%d%b%Y")
+head(dat)
+dat$orddate = NULL
+str(dat)
+dim(dat)
+```
+
+```{r}
+which(is.na(dat))
+```
+
+# read dependent variable
+```{r}
+y = read.csv("data/booktrain.csv")
+head(y)
+```
+
+# Creating summary variables
+# Frequency_ord and monetary_tot look to be highly correlated 
+```{r}
+x = dat %>%
+  group_by(id) %>%
+  summarise(
+    recency = as.numeric(as.Date('2014-08-01') - max(orddt)),
+    frequency = sum(qty),
+    frequency_ord = n_distinct(ordnum),
+    monetary_tot = sum(price),
+    monetary_avg = mean(price),
+    tof = as.numeric(as.Date('2014-08-01') - min(orddt))
+    ) %>%
+  select(id, recency, frequency, frequency_ord, monetary_tot, monetary_avg, tof)
+head(x)
+cor(x[-1])
+```
+
+# merge
+```{r}
+all = left_join(x, y, by="id")
+head(all)
+```
+# EDA
+
+# histogram for categories
+```{r}
+hist(dat$category)
+```
+
+# plotting summary variables vs logtarg
+```{r}
+library(ggplot2)
+```
+
+```{r}
+ggplot(data = all, aes(recency, logtarg)) + 
+  geom_point()
+ggplot(data = all, aes(frequency, logtarg)) + 
+  geom_point()
+ggplot(data = all, aes(frequency_ord, logtarg)) + 
+  geom_point()
+ggplot(data = all, aes(monetary_tot, logtarg)) + 
+  geom_point()
+ggplot(data = all, aes(monetary_avg, logtarg)) + 
+  geom_point()
+ggplot(data = all, aes(tof, logtarg)) + 
+  geom_point()
+```
+
+```{r}
+all2 <- all
+all2$targ = exp(all$logtarg)-1
+```
+
+# plotting summary variables against targ...note most variables are right skewed so may want to take log transformation of variables
+```{r}
+ggplot(data = all2, aes(recency, targ)) + 
+  geom_point()
+ggplot(data = all2, aes(frequency, targ)) + 
+  geom_point()
+ggplot(data = all2, aes(frequency_ord, targ)) + 
+  geom_point()
+ggplot(data = all2, aes(monetary_tot, targ)) + 
+  geom_point()
+ggplot(data = all2, aes(monetary_avg, targ)) + 
+  geom_point()
+ggplot(data = all2, aes(tof, logtarg)) + 
+  geom_point()
+```
+
+```{r}
+fit = lm(logtarg ~ log(frequency + 1), all)
+summary(fit)
+```
+
+```{r}
+fit_spend = lm(targ ~ log(frequency + 1), all2)
+summary(fit_spend)
+```
+
+```{r}
+library(leaps)
+full = lm(targ ~ log(recency + 1) + log(tof + 1) + log(frequency + 1) + log(frequency_ord + 1) + log(monetary_tot + 1) + log(monetary_avg + 1),data = all2)
+step(full, data = all2, direction = "backward")
+```
+```{r}
+fit_backstep = lm(formula = targ ~ log(recency + 1) + log(tof + 1) + log(frequency + 
+    1) + log(frequency_ord + 1) + log(monetary_avg + 1), data = all2)
+summary(fit_backstep)
+```
+
+# predict spend
+```{r}
+all2$yhat = predict(fit, all)
+```
+
+#transform prediction back to logtarg
+```{r}
+all$yhat = log(all$yhat_spend + 1)
+```
+
+# write results to CSV
+```{r}
+head(all)
+test = is.na(all$logtarg)
+write.csv(all[test, c('id', 'yhat')], "output/test_rfm.csv", row.names=F)
+```
+
+
