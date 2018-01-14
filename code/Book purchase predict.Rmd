@@ -8,7 +8,8 @@ output: html_document
 ```{r setup, include=FALSE}
 knitr::opts_chunk$set(echo = TRUE)
 # knitr::opts_knit$set(root.dir = "/Users/siliangchen/msia421_hw1_kaggle")
-knitr::opts_knit$set(root.dir = "/Users/spencermoon/Documents/MSiA_421/msia421_hw1_kagglee")
+# knitr::opts_knit$set(root.dir = "/Users/spencermoon/Documents/MSiA_421/msia421_hw1_kagglee")
+# knitr::opts_knit$set(root.dir = "C:/Users/anish/Dropbox/Q2_Winter18/MSIA_421_DataMining/msia421_hw1_kaggle")
 ```
 
 ```{r, message = FALSE}
@@ -85,6 +86,7 @@ table(dat$book)
 -frequency: count of previous behaviors, indicates loyalty
 -monetary: sum/total spend of $ or time over a past period
 -time of file: time since first purchase (min/max) 
+
 ```{r}
 # do simple roll up
 x = dat %>%
@@ -121,11 +123,30 @@ x$prate = x$frequency_ord/x$recency_first
 x$catrate = x$count_cat/x$frequency_ord
 x$prate2 = x$frequency_ord/(x$date_duration + 1)
 
+# ADDED BY ANISHA
+#dummy variable - ordered category 20
+cat20 = dat %>%
+  filter(category == 20) %>%
+  distinct(id) %>%
+  mutate(cat20 = 1)
+x = left_join(x,cat20,by="id")
+x$cat20[is.na(x$cat20)] = 0
+
+#dummy variable - ordered category 19
+cat19 = dat %>%
+  filter(category == 19) %>%
+  distinct(id) %>%
+  mutate(cat19 = 1)
+x = left_join(x,cat19,by="id")
+x$cat19[is.na(x$cat19)] = 0
+
 #check predictors cor
 cor_mat = cor(x[-1]) 
 cor(x[-1]) > 0.6 #f & freq_ord are colinear as expected, avg_ord and monetary_tot
 ```
-2.Model fitting
+
+
+2. Model fitting
 ```{r}
 # read in dependent variable
 y = read.csv("../data/booktrain.csv")
@@ -198,3 +219,16 @@ out = all[test,keep]
 head(out)
 write.csv(out, "../output/test_sm.csv", row.names=F)
 ```
+
+
+
+
+
+
+
+
+
+
+
+
+
