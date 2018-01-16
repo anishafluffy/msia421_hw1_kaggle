@@ -143,6 +143,7 @@ x$cat19[is.na(x$cat19)] = 0
 #check predictors cor
 cor_mat = cor(x[-1]) 
 cor(x[-1]) > 0.6 #f & freq_ord are colinear as expected, avg_ord and monetary_tot
+#f, date_duration, recency_first, frequency_ord, count_cat have high correlation
 ```
 
 
@@ -203,12 +204,40 @@ adj = step(full, scope = list(upper=full), data = train, direction="both")
 summary(adj)
 ```
 
+2.4 Linear + Logistic Part 1: Linear - trained on 
+```{r}
+train_lm = all[!is.na(all$logtarg) & all$logtarg > 0,] #280 obs instead of 8311
 
+colnames(train_lm)
+cor(train_lm[-1]) 
+
+full_lm = lm(logtarg ~ recency_first 
+             + recency_last 
+             #+ date_duration 
+             #+ log(p_qty) 
+             + log(frequency_ord) 
+             #+ log(monetary_tot) 
+             + log(monetary_avg + 1) 
+             + log(avg_ord + 1) 
+             + log(count_cat)
+             + log(prate) 
+             #+ log(catrate) 
+             + log(prate2) 
+             + cat19 
+             + cat20
+             , data = train_lm)
+summary(full_lm)
+vif(full_lm)
+
+adj_lm = step(full_lm, scope = list(upper=full_lm), data = train_lm, direction="both")
+summary(adj_lm)
+
+```
 
 
 ```{r}
 #Predict and output
-all$yhat = predict(adj,all)
+all$yhat = predict(full_lm, all)
 length(all$yhat)
 head(all)
 
