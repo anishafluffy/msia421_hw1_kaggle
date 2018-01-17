@@ -8,7 +8,7 @@ output: html_document
 ```{r setup, include=FALSE}
 knitr::opts_chunk$set(echo = TRUE)
 # knitr::opts_knit$set(root.dir = "/Users/siliangchen/msia421_hw1_kaggle")
-# knitr::opts_knit$set(root.dir = "/Users/spencermoon/Documents/MSiA_421/msia421_hw1_kagglee")
+ knitr::opts_knit$set(root.dir = "/Users/spencermoon/Documents/MSiA_421/msia421_hw1_kagglee")
 # knitr::opts_knit$set(root.dir = "C:/Users/anish/Dropbox/Q2_Winter18/MSIA_421_DataMining/msia421_hw1_kaggle")
 ```
 
@@ -18,6 +18,7 @@ library(lubridate)
 library(MASS)
 library(dplyr)
 library(car)
+source("util.R")
 ```
 
 1. Reading data
@@ -155,6 +156,7 @@ y = read.csv("../data/booktrain.csv")
 
 #join tables
 all = left_join(x,y,by="id")
+all$responseflag = ifelse(all$logtarg > 0, 1, 0)
 dim(all)
 ```
 
@@ -236,23 +238,82 @@ vif(adj_lm)
 plot(adj_lm)
 ```
 
-
+2.5 Linear + Logistic Part 2: Logistic - trained on logtarg not NA
 ```{r}
-#Predict and output
-all$yhat = predict(full_lm, all)
-length(all$yhat)
-head(all)
+train_log = all[!is.na(all$logtarg) & all$logtarg >= 0,]
 
-#output test values
-test = is.na(all$logtarg)
-keep = c('id', 'yhat')
-out = all[test,keep]
-head(out)
-write.csv(out, "../output/test_sm.csv", row.names=F)
+log_fit <- glm(responseflag ~ recency_first 
+             + recency_last 
+             #+ date_duration 
+             #+ log(p_qty) 
+             + log(frequency_ord) 
+             #+ log(monetary_tot) 
+             + log(monetary_avg + 1) 
+             + log(avg_ord + 1) 
+             + log(count_cat)
+             + log(prate) 
+             #+ log(catrate) 
+             + log(prate2) 
+             + cat19 
+             + cat20,
+family = "binomial", data = train_log)
+
+summary(log_fit)
+
+adj_log_fit <- glm(responseflag ~ recency_first 
+             + log(frequency_ord) 
+             + log(prate) 
+             + cat20,
+family = binomial("logit"), data = train_log)
+
+summary(adj_log_fit)
+vif(adj_log_fit)
+```
+
+Choose threshold p for logistic model
+```{r}
+predicted_vals <- predict(adj_log_fit, data = train_log, type = "response")
+#get_logit_details(train_log$responseflag, predicted_vals, 0.10) #0.1
+get_logit_details(train_log$responseflag, predicted_vals, 0.071) #0.1355
 ```
 
 
+CURRENT FINAL OUTPUT WITH THE HIGHEST SCORE!!!
+```{r}
+#Predict and output
+test = all[is.na(all$logtarg),]
 
+test$yhat = predict(adj_lm, test)
+prob = predict(adj_log_fit, test, type = "response")
+
+
+#output test values
+out = cbind(test[,c('id', 'yhat')], prob)
+out$logtarg = out$yhat * out$prob
+final = out[,c('id','logtarg')]
+colnames(final) <- c("id", "yhat")
+head(final)
+write.csv(final, "../output/test_lmlog.csv", row.names=F)
+```
+
+Choosing threshold p
+```{r}
+#Predict and output
+test = all[is.na(all$logtarg),]
+
+test$yhat = predict(adj_lm, test)
+prob = predict(adj_log_fit, test, type = "response")
+
+
+#output test values
+out = cbind(test[,c('id', 'yhat')], prob)
+out$flag = ifelse(out$prob >= 0.071, 1, 0)
+out$logtarg = out$yhat * out$flag
+final = out[,c('id','logtarg')]
+colnames(final) <- c("id", "yhat")
+head(final)
+write.csv(final, "../output/test_threshold.csv", row.names=F)
+```
 
 
 
