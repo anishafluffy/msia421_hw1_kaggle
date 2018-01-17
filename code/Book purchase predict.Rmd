@@ -231,7 +231,9 @@ vif(full_lm)
 
 adj_lm = step(full_lm, scope = list(upper=full_lm), data = train_lm, direction="both")
 summary(adj_lm)
+vif(adj_lm)
 
+plot(adj_lm)
 ```
 
 
