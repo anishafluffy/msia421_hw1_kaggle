@@ -116,7 +116,7 @@ table(dat$book)
 x = dat %>%
  group_by(id) %>%
  summarise(f=n(),
-           # FEATURES ADDED BY JAMIE
+           # ORIGINAL FEATURES, ADDED BY JAMIE
            recency_first = as.numeric(as.Date('2014-08-01') - min(orddt)), #time since first purchase - tof
            recency_last = as.numeric(as.Date('2014-08-01') - max(orddt)), #time since last purchase - rec
            date_duration = recency_first - recency_last, #time between 1st and last purchases
@@ -133,6 +133,7 @@ x = dat %>%
 #head(x)
 dim(x)
 ```
+
 Additional features
 ```{r}
 # ADDED BY JAMIE
@@ -207,6 +208,7 @@ plot(log(train$p_qty), train$logtarg)
 
 plot(log(train$prate),train$logtarg)
 ```
+
 Additional EDAs on category
 ```{r}
 train2 = inner_join(dat, y, by="id")
@@ -223,6 +225,7 @@ cats[cats$diff > 0.01,]
 ```
 
 **3. Model fitting**
+
 a. Baseline model => submitted with score 0.61844
 ```{r}
 fit1 = lm(logtarg ~ log(monetary_avg+1) + log(avg_ord+1) + log(frequency_ord) + recency_first + recency_last, all)
@@ -230,6 +233,7 @@ fit1 = lm(logtarg ~ log(monetary_avg+1) + log(avg_ord+1) + log(frequency_ord) + 
 vif(fit1)
 #plot(fit1)
 ```
+
 b. Model fit2 => submitted with score 0.61887
 ```{r}
 fit2 = lm(logtarg ~ log(monetary_avg+1) + log(avg_ord+1) + log(frequency_ord) + log(prate) + recency_first + recency_last, all)
@@ -251,7 +255,7 @@ vif(adj)
 ```
 
 **4. Model fitting - logistic and regression**
-a. Linear + Logistic Part 1: Linear - trained on logtarg >0
+a. Linear + Logistic Part 1: Linear - trained on logtarg > 0
 ```{r}
 train_lm = all[!is.na(all$logtarg) & all$logtarg > 0,] #280 obs instead of 8311
 
@@ -338,6 +342,14 @@ colnames(final) <- c("id", "yhat")
 head(final)
 write.csv(final, "output/test_lmlog.csv", row.names=F)
 ```
+
+**Findings & Conclusion**
+
+During feature creation, certain book categories seemed to have an association with a customer making another purchase. Therefore, indicator variables were added to flag whether a customer made a purchase or not for categories 17, 19, and 20.
+
+For the regression model, we saw that numerical variables around the actual purchase amount were significant predictors for how much a customer would spend on their next order (e.g. average price of an item, average order size), along with the indicator variables for customers who made purchases in book categories 19 & 20.
+
+For the logistic model, numerical variables which described a customers purchasing behavior (e.g. frequency of orders and purchase rate) along with the indicator variable for customers purchasing books in category 20 were significant predictors of whether the customer would make a next purchase.
 
 OLD Testing with Choosing threshold p
 ```{r}
