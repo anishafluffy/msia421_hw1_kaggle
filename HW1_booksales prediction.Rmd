@@ -1,0 +1,369 @@
+---
+title: "Book purchase prediction"
+author: "Funalytics - Anisha, Jamie, Lindsay, Spencer, Veronica"
+date: "1/13/2018"
+final public leaderboard score: 0.61751
+output:
+  pdf_document: default
+  html_document: default
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+knitr::opts_knit$set(root.dir = "/Users/siliangchen/msia421_hw1_kaggle")
+#knitr::opts_knit$set(root.dir = "/Users/spencermoon/Documents/MSiA_421/msia421_hw1_kagglee")
+# knitr::opts_knit$set(root.dir = "C:/Users/anish/Dropbox/Q2_Winter18/MSIA_421_DataMining/msia421_hw1_kaggle")
+```
+
+
+```{r, message = FALSE}
+library(ggplot2)
+library(lubridate)
+library(MASS)
+library(dplyr)
+library(car)
+#source("util.R")
+```
+
+# Overall approach
+**1. Read in data and run EDA, focus on categories and price and quantity**
+
+**2. Feature engineering:**
+
+  a. create RFM features
+  b. additional features based on EDA findings
+  c. merge with booktrain data for additional EDA, and see if features need transformation for better linear relationships with logtargdol
+  
+**3. Model fitting - regressions**
+
+  a. baseline model fitting
+  b. additional tries by adding/removing features
+  
+**4. Model fitting - logistic and regression**
+
+  a. train regressions model based on those whose logtargdol >0, apply stepwise to select final subset of vars:      log(monetary_avg + 1), log(avg_ord + 1), dummy vars on cat19 and cat20 
+  b. train logistic model based on buyer or not buyer (logtargdol >0 buyer)
+  c. multiple a * b for final predicted logtargdol 
+
+**1. Reading data and describe**
+```{r}
+#read orders
+dat = read.csv("data/orders.csv")
+dat$orddt = as.Date(dat$orddate, "%d%b%Y")
+dat$orddate = NULL
+#head(dat)
+str(dat)
+dim(dat)
+```
+
+```{r}
+#min date = "2007-11-04"
+min(dat$orddt)
+#max date = "2014-07-31"
+max(dat$orddt)
+```
+
+Initial EDA and data checks on orders
+a. qualitative var - category => category 99 has some oddities (most qty with price - $0, max price = 1533)
+b. quantitative vars - qty,price
+```{r}
+missing = dat[!complete.cases(dat),] #no missing value
+
+#category frequency 
+ggplot(data=dat, aes(x=category)) + geom_histogram(binwidth = 1)
+
+#category by price (most $)
+result = tapply(dat$price, dat$category,mean)
+sort_price = result[order(result)] #category 17 (art prints) is $$$
+art_collect = dat[dat$category==17,] #these people buy at most 3 items
+
+#category by Q (most popular category)
+result2 = tapply(dat$qty, dat$category,mean)
+sort_q = result2[order(result2)] #note - cat99 nonbooks has the highest avg 
+result3 = tapply(dat$qty, dat$category,median)
+sort_q3 = result3[order(result3)] #median is all 1
+result4 = tapply(dat$qty, dat$category,max)
+sort_q4 = result4[order(result4)] #category 99 is nonbooks, ID 8070857 has price =0, Q = max.
+
+#category by price * Q (most popular category)
+qp = tapply(dat$qty * dat$price, dat$category,mean)
+sort_qp = qp[order(qp)] #align with expectation - 17 has the largest avg order size
+
+qpm = tapply(dat$qty * dat$price, dat$category,max)
+sort_qpm = qpm[order(qpm)] #8,14,35,37 have the max one-time order amounts, >$140k; makes sense, 37 is learning=> textbooks
+```
+
+```{r}
+#Descriptive stats
+summary(dat[,-1])
+
+#investigate items with $0 in price
+percent_price0 = count(dat[dat$price == 0,])/count(dat)
+
+#The majority of items with 0 price are non-books, add flag to indicate: if category = 99, book = 0
+dat$book = 0
+dat$book[dat$category!=99]=1 
+table(dat$book)
+```
+
+**2. feature engineer**
+-recency: max/min time since last purchase, indicates inactivity
+-frequency: count of previous behaviors, indicates loyalty
+-monetary: sum/total spend of $ or time over a past period
+-time of file: time since first purchase (min/max) 
+```{r}
+# do simple roll up
+x = dat %>%
+ group_by(id) %>%
+ summarise(f=n(),
+           # FEATURES ADDED BY JAMIE
+           recency_first = as.numeric(as.Date('2014-08-01') - min(orddt)), #time since first purchase - tof
+           recency_last = as.numeric(as.Date('2014-08-01') - max(orddt)), #time since last purchase - rec
+           date_duration = recency_first - recency_last, #time between 1st and last purchases
+           p_qty = sum(qty), #number of items 
+           frequency_ord = n_distinct(ordnum), #number of distinct orders, which <= f
+           monetary_tot = sum(price * qty), #total spent
+           monetary_avg = mean(price), #how expensive is each ordered item
+           
+           # FEATURES ADDED BY SPENCER
+           count_cat = n_distinct(category) #number of distinct categories ordered
+          )%>% 
+  dplyr::select(id, recency_first, recency_last, date_duration, p_qty, frequency_ord, monetary_tot, monetary_avg, count_cat,f)
+
+#head(x)
+dim(x)
+```
+Additional features
+```{r}
+# ADDED BY JAMIE
+#avg order size
+x$avg_ord = x$monetary_tot/x$frequency_ord 
+
+#purchase rate = purchases/period
+x$prate = x$frequency_ord/x$recency_first
+
+# ADDED BY SPENCER
+#diversity of order
+x$catrate = x$count_cat/x$frequency_ord
+x$prate2 = x$frequency_ord/(x$date_duration + 1)
+
+# ADDED BY ANISHA
+#dummy variable - ordered category 20
+cat20 = dat %>%
+  filter(category == 20) %>%
+  distinct(id) %>%
+  mutate(cat20 = 1)
+x = left_join(x,cat20,by="id")
+x$cat20[is.na(x$cat20)] = 0
+
+#dummy variable - ordered category 19
+cat19 = dat %>%
+  filter(category == 19) %>%
+  distinct(id) %>%
+  mutate(cat19 = 1)
+x = left_join(x,cat19,by="id")
+x$cat19[is.na(x$cat19)] = 0
+
+#dummy variable - ordered category 17
+cat17 = dat %>%
+  filter(category == 17) %>%
+  distinct(id) %>%
+  mutate(cat17 = 1)
+x = left_join(x,cat17,by="id")
+x$cat17[is.na(x$cat17)] = 0
+
+#check predictors cor
+cor_mat = cor(x[2:14]) 
+cor_mat > 0.6 #f & freq_ord are colinear as expected, avg_ord and monetary_tot
+#f, date_duration, recency_first, frequency_ord, count_cat have high correlation
+```
+
+```{r}
+# read in dependent variable
+y = read.csv("data/booktrain.csv")
+#head(y)
+
+#Left join booktrain table with orders, add a flag on buyer or not
+all = left_join(x,y,by="id")
+all$responseflag = ifelse(all$logtarg > 0, 1, 0)
+dim(all)
+```
+
+Variable transformation based on EDA
+- Create log transormation for F and M because of right skew
+```{r}
+train = all[!is.na(all$logtarg),] #8224 obs instead of 8311
+
+#plot(log(train$monetary_tot), train$logtarg)
+plot(log(train$monetary_tot +1), train$logtarg)
+plot(train$monetary_tot, train$logtarg)
+
+plot(log(train$monetary_avg), train$logtarg)
+plot(log(train$avg_ord), train$logtarg)
+plot(log(train$frequency_ord), train$logtarg)
+
+plot((train$p_qty), train$logtarg)
+plot(log(train$p_qty), train$logtarg)
+
+plot(log(train$prate),train$logtarg)
+```
+Additional EDAs on category
+```{r}
+train2 = inner_join(dat, y, by="id")
+
+cats = train2 %>%
+  group_by(category) %>%
+  summarize(qty_0 = sum(qty[logtarg == 0]), qty_1 = sum(qty[logtarg > 0])) %>% #Why Anisha added cat19 and cat20
+  #summarize(qty_0 = sum(qty*price[logtarg == 0]), qty_1 = sum(qty*price[logtarg > 0])) %>% #try add cat17
+  mutate(pct_0 = qty_0/sum(qty_0), pct_1 = qty_1/sum(qty_1), diff = abs(pct_1 - pct_0)) %>%
+  select(category, qty_0, qty_1, pct_0, pct_1, diff)
+
+#ggplot(data = cats, aes(category, diff)) + geom_point()
+cats[cats$diff > 0.01,]
+```
+
+**3. Model fitting**
+a. Baseline model => submitted with score 0.61844
+```{r}
+fit1 = lm(logtarg ~ log(monetary_avg+1) + log(avg_ord+1) + log(frequency_ord) + recency_first + recency_last, all)
+#summary(fit1)
+vif(fit1)
+#plot(fit1)
+```
+b. Model fit2 => submitted with score 0.61887
+```{r}
+fit2 = lm(logtarg ~ log(monetary_avg+1) + log(avg_ord+1) + log(frequency_ord) + log(prate) + recency_first + recency_last, all)
+#summary(fit2)
+vif(fit2)
+```
+
+c. Model fit3 ADDED BY SPENCER
+```{r}
+full = lm(logtarg ~ recency_first + recency_last + date_duration + log(p_qty) + log(count_cat)
+          + log(catrate) + log(monetary_avg + 1)  + log(avg_ord + 1) 
+          + log(frequency_ord) + log(prate)
+        , data = train)
+#summary(full)
+
+adj = step(full, scope = list(upper=full), data = train, direction="both")
+summary(adj)
+vif(adj)
+```
+
+**4. Model fitting - logistic and regression**
+a. Linear + Logistic Part 1: Linear - trained on logtarg >0
+```{r}
+train_lm = all[!is.na(all$logtarg) & all$logtarg > 0,] #280 obs instead of 8311
+
+colnames(train_lm)
+#cor(train_lm[-1]) 
+
+full_lm = lm(logtarg ~ recency_first 
+             + recency_last 
+             #+ date_duration 
+             #+ log(p_qty) 
+             + log(frequency_ord) 
+             #+ log(monetary_tot) 
+             + log(monetary_avg + 1) 
+             + log(avg_ord + 1) 
+             + log(count_cat)
+             + log(prate) 
+             #+ log(catrate) 
+             + log(prate2) 
+             + cat19 
+             + cat20
+             + cat17, data = train_lm)
+summary(full_lm)
+#vif(full_lm)
+
+adj_lm = step(full_lm, scope = list(upper=full_lm), data = train_lm, direction="both")
+summary(adj_lm)
+vif(adj_lm)
+#plot(adj_lm)
+```
+
+b. Linear + Logistic Part 2: Logistic - trained on logtarg not NA 
+```{r}
+train_log = all[!is.na(all$logtarg) & all$logtarg >= 0,]
+
+log_fit <- glm(responseflag ~ recency_first 
+             + recency_last 
+             #+ date_duration 
+             #+ log(p_qty) 
+             + log(frequency_ord) 
+             #+ log(monetary_tot) 
+             + log(monetary_avg + 1) 
+             + log(avg_ord + 1) 
+             + log(count_cat)
+             + log(prate) 
+             #+ log(catrate) 
+             + log(prate2) 
+             + cat19 
+             + cat20
+             + cat17,
+family = "binomial", data = train_log)
+
+summary(log_fit)
+
+adj_log_fit <- glm(responseflag ~ recency_first 
+             + log(frequency_ord) 
+             + log(prate) 
+             + cat20,
+family = binomial("logit"), data = train_log)
+
+summary(adj_log_fit)
+vif(adj_log_fit)
+```
+
+Choose threshold p for logistic model
+```{r}
+predicted_vals <- predict(adj_log_fit, data = train_log, type = "response")
+#get_logit_details(train_log$responseflag, predicted_vals, 0.10) #0.1
+#get_logit_details(train_log$responseflag, predicted_vals, 0.071) #0.1355
+```
+
+CURRENT FINAL OUTPUT WITH THE HIGHEST SCORE!!!
+```{r}
+#Predict and output
+test = all[is.na(all$logtarg),]
+
+test$yhat = predict(adj_lm, test)
+prob = predict(adj_log_fit, test, type = "response")
+
+#output test values
+out = cbind(test[,c('id', 'yhat')], prob)
+out$logtarg = out$yhat * out$prob
+final = out[,c('id','logtarg')]
+colnames(final) <- c("id", "yhat")
+head(final)
+write.csv(final, "output/test_lmlog.csv", row.names=F)
+```
+
+OLD Testing with Choosing threshold p
+```{r}
+#Predict and output
+test = all[is.na(all$logtarg),]
+
+test$yhat = predict(adj_lm, test)
+prob = predict(adj_log_fit, test, type = "response")
+
+
+#output test values
+out = cbind(test[,c('id', 'yhat')], prob)
+out$flag = ifelse(out$prob >= 0.071, 1, 0)
+out$logtarg = out$yhat * out$flag
+final = out[,c('id','logtarg')]
+colnames(final) <- c("id", "yhat")
+head(final)
+#write.csv(final, "../output/test_threshold.csv", row.names=F)
+```
+
+
+
+
+
+
+
+
+
+
